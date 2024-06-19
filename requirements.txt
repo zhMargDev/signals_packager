@@ -1,0 +1,6 @@
+telebot
+time
+psycopg2
+ccxt
+asyncio
+json
