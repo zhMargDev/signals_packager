@@ -43,13 +43,13 @@ async def bot_function( cursor , channel_id , message_id, channel_type):
     if signal[10] != []:
         flag = 1
         for number in eval(signal[10]):
-            lvh_message += f'Lvh{flag}: {number}\n'
+            lvh_message += f'{" " * 24}Lvh{flag}: {number}\n'
             flag += 1
 
     tp_message = ''
     flag = 1
     for number in eval(signal[11]):
-        tp_message += f'Tp{flag}: {number}\n'
+        tp_message += f'{" " * 24}Tp{flag}: {number}\n'
         flag += 1
 
     stop_less = ''
