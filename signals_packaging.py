@@ -1,11 +1,11 @@
-import psycopg2
-import config 
-import telebot
-import json
+import psycopg2, telebot, json, os, hashlib
+import signal_template as st
+import folders_regions as fr
+import configs.config as config
 
 from datetime import datetime 
 
-rate_json_file = 'rate.json'
+rate_json_file = 'configs/rate.json'
 with open(rate_json_file, 'r') as f:
     data = json.load(f)
 
@@ -19,62 +19,54 @@ conn = psycopg2.connect(
             )
 cursor = conn.cursor()
 
-async def insert_packaged_signals(data, conn, cursor):
+async def insert_packaged_signals(data, conn, cursor, region):
     add_to_ps="INSERT INTO packaged_signals (region , region_number , channel_type , signal_channel_id , signal_message_id , date  ) VALUES (%s , %s , %s , %s , %s , %s)"
     ps_values = (data[0], data[1], data[2], data[3], data[4], data[5])
     cursor.execute(add_to_ps, ps_values)    
     conn.commit()
-    await bot_function(cursor , data[3], data[4] , data[2] )
+    await bot_function(cursor , data[3], data[4] , data[2] , region)
     
-async def bot_function( cursor , channel_id , message_id, channel_type):
+async def hash_to_8_chars(input_string):
+        # Преобразование входных данных в строку (если это число)
+        if isinstance(input_string, int):
+            input_string = str(input_string)
+        
+        # Вычисление SHA-256 хеша
+        sha256_hash = hashlib.sha256(input_string.encode()).hexdigest()
+        
+        # Возвращение первых 8 символов хеша
+        return sha256_hash[:8]
 
-    bot = telebot.TeleBot( config.RU_GROUPS[str(data["ru_rate"])]['BOT'])
+async def bot_function( cursor , channel_id , message_id, channel_type, region):
+
+    bot = telebot.TeleBot( config.RU_GROUPS[str(data[region])]['BOT'])
     cursor.execute(f'SELECT * FROM signals WHERE channel_id = {channel_id} AND message_id = {message_id}' )
     signal = cursor.fetchall()[0]
 
-    tvh = ''
-    if signal[8] != 'False': tvh = f'Tvh: {signal[8]}'
+    # Получение хеша
+    channel_hashed_id = await hash_to_8_chars(signal[0])
 
-    rvh = ''
-    if signal[9]: rvh = 'Rvh'
+    data = {
+        'channel_id': channel_hashed_id,
+        'channel_name': signal[3],
+        'trend' : signal[7],
+        'coin': signal[6],
+        'margin': signal[14],
+        'leverage' : signal[13],
+        'tvh' : signal[8],
+        'lvh' : signal[10],
+        'rvh' : signal[9],
+        'targets' : signal[11],
+        'stop_less': signal[12]
+    }
 
-    lvh_message = ''
-    
-    if signal[10] != []:
-        flag = 1
-        for number in eval(signal[10]):
-            lvh_message += f'{" " * 24}Lvh{flag}: {number}\n'
-            flag += 1
-
-    tp_message = ''
-    flag = 1
-    for number in eval(signal[11]):
-        tp_message += f'{" " * 24}Tp{flag}: {number}\n'
-        flag += 1
-
-    stop_less = ''
-    if signal[12] != 'Def': stop_less = f'Stop: {signal[12]}'
-
-    leverage = ''
-    if signal[13] != 'Def': leverage = f"Leverage: {signal[13]}x"
-
-    sended_message = f'''
-    ID: {signal[0]}
-    {signal[3]}
-    
-    Trend: {signal[7]}    |    Coin: {signal[6]}
-    Margin:  {signal[14]}    |    Leverage:  {leverage}
+    path = f'groups/ru_{channel_id}/signal.html'
+    # Проверка существования файла
+    if not os.path.exists(path):
+        path = 'groups/signal.html'
         
-    Entry:
-              {tvh}
-              {rvh}
-              {lvh_message}
-    Target:
-              {tp_message} 
+    sended_message =  await st.signal_template_format(data, path)
 
-    Stop:     {stop_less}
-
-    '''
     blocked_message = f'''
     Чтобы посмотреть все сигналы вы можете купить подписку на VIP
 
@@ -94,6 +86,7 @@ async def bot_function( cursor , channel_id , message_id, channel_type):
     Stop:     [VIP]
 
     '''
+
     lite_blocked_message = f'''
     Чтобы посмотреть все сигналы вы можете купить подписку на PREMIUM или VIP
 
@@ -114,17 +107,17 @@ async def bot_function( cursor , channel_id , message_id, channel_type):
 
     '''
     if channel_type == 'LITE':
-        bot.send_message(config.RU_GROUPS[str(data["ru_rate"])]['CHANNELS']['LITE'], sended_message)
-        bot.send_message(config.RU_GROUPS[str(data["ru_rate"])]['CHANNELS']['PREMIUM'], blocked_message)
-        bot.send_message(config.RU_GROUPS[str(data["ru_rate"])]['CHANNELS']['VIP'], sended_message)
+        bot.send_message(config.RU_GROUPS[str(data[region])]['CHANNELS']['LITE'], sended_message,  parse_mode='HTML')
+        bot.send_message(config.RU_GROUPS[str(data[region])]['CHANNELS']['PREMIUM'], blocked_message)
+        bot.send_message(config.RU_GROUPS[str(data[region])]['CHANNELS']['VIP'], sended_message,  parse_mode='HTML')
     elif channel_type == 'PREMIUM':
-        bot.send_message(config.RU_GROUPS[str(data["ru_rate"])]['CHANNELS']['LITE'], lite_blocked_message)
-        bot.send_message(config.RU_GROUPS[str(data["ru_rate"])]['CHANNELS']['PREMIUM'], sended_message)
-        bot.send_message(config.RU_GROUPS[str(data["ru_rate"])]['CHANNELS']['VIP'], sended_message)
+        bot.send_message(config.RU_GROUPS[str(data[region])]['CHANNELS']['LITE'], lite_blocked_message)
+        bot.send_message(config.RU_GROUPS[str(data[region])]['CHANNELS']['PREMIUM'], sended_message,  parse_mode='HTML')
+        bot.send_message(config.RU_GROUPS[str(data[region])]['CHANNELS']['VIP'], sended_message,  parse_mode='HTML')
     else:
-        bot.send_message(config.RU_GROUPS[str(data["ru_rate"])]['CHANNELS']['LITE'], lite_blocked_message)
-        bot.send_message(config.RU_GROUPS[str(data["ru_rate"])]['CHANNELS']['PREMIUM'], blocked_message)
-        bot.send_message(config.RU_GROUPS[str(data["ru_rate"])]['CHANNELS']['VIP'], sended_message)
+        bot.send_message(config.RU_GROUPS[str(data[region])]['CHANNELS']['LITE'], lite_blocked_message)
+        bot.send_message(config.RU_GROUPS[str(data[region])]['CHANNELS']['PREMIUM'], blocked_message)
+        bot.send_message(config.RU_GROUPS[str(data[region])]['CHANNELS']['VIP'], sended_message,  parse_mode='HTML')
 
     # Завершаем работу бота
     return
@@ -142,8 +135,10 @@ async def package_by_channels(chanel_id, message_id):
                 password='parser'
             )
     cursor = conn.cursor()
-    ru_rate=str(data["ru_rate"])
-    sql = f"SELECT * FROM packaged_signals WHERE date == {date_str} AND region == 'RU' AND region_number == {ru_rate}"
+    region = await get_folder_region(chanel_id, cursor)
+    rate = data[region]
+
+    sql = f"SELECT * FROM packaged_signals WHERE date == {date_str} AND region == {region} AND region_number == {rate}"
     cursor.execute(sql)
     signals=cursor.fetchall()
     lite_signals=0
@@ -158,9 +153,9 @@ async def package_by_channels(chanel_id, message_id):
 
  
     if lite_signals == 0 :
-        await insert_packaged_signals(['RU', str(data["ru_rate"]), 'LITE', chanel_id, message_id, date_str], conn , cursor)
+        await insert_packaged_signals([region, str(data[region]), 'LITE', chanel_id, message_id, date_str], conn , cursor, region)
         return 0
-    elif lite_signals< config.RU_GROUPS[str(data["ru_rate"])]["LITE_SIGNAL_COUNT"]:
+    elif lite_signals< config.RU_GROUPS[str(data[region])]["LITE_SIGNAL_COUNT"]:
         lite_signals_flag = 0
         lite_count = 0
         for signal in signals:
@@ -168,14 +163,14 @@ async def package_by_channels(chanel_id, message_id):
                 lite_signals_flag += 1
             elif lite_signals_flag == lite_signals: 
                 lite_count += 1
-                if lite_count== config.RU_GROUPS[str(data["ru_rate"])]["LITE_SIGNAL_PROBELS"]:
-                    await insert_packaged_signals(['RU', str(data["ru_rate"]), 'LITE', chanel_id, message_id, date_str], conn , cursor)
+                if lite_count== config.RU_GROUPS[str(data[region])]["LITE_SIGNAL_PROBELS"]:
+                    await insert_packaged_signals([region, str(data[region]), 'LITE', chanel_id, message_id, date_str], conn , cursor, region)
                     return 0
 
     if premium_signals == 0 :
-        await insert_packaged_signals(['RU', str(data["ru_rate"]), 'PREMIUM', chanel_id, message_id, date_str], conn , cursor)
+        await insert_packaged_signals([region, str(data[region]), 'PREMIUM', chanel_id, message_id, date_str], conn , cursor, region)
         return 0
-    elif premium_signals< config.RU_GROUPS[str(data["ru_rate"])]["PREMIUM_SIGNAL_COUNT"]:
+    elif premium_signals< config.RU_GROUPS[str(data[region])]["PREMIUM_SIGNAL_COUNT"]:
         premium_signals_flag = 0
         premium_count = 0
         for signal in signals:
@@ -183,11 +178,11 @@ async def package_by_channels(chanel_id, message_id):
                 premium_signals_flag  += 1
             elif premium_signals_flag  == premium_signals: 
                 premium_count += 1
-                if premium_count==  config.RU_GROUPS[str(data["ru_rate"])]["PREMIUM_SIGNAL_PROBELS"]:
-                    await insert_packaged_signals(['RU', str(data["ru_rate"]), 'PREMIUM', chanel_id, message_id, date_str], conn , cursor)
+                if premium_count==  config.RU_GROUPS[str(data[region])]["PREMIUM_SIGNAL_PROBELS"]:
+                    await insert_packaged_signals([region, str(data[region]), 'PREMIUM', chanel_id, message_id, date_str], conn , cursor, region)
                     return 0                
 
-    await insert_packaged_signals(['RU', str(data["ru_rate"]), 'VIP', chanel_id, message_id, date_str], conn , cursor)
+    await insert_packaged_signals([region, str(data[region]), 'VIP', chanel_id, message_id, date_str], conn , cursor, region)
     
 
     cursor.execute(signal , date_str)

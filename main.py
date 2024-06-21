@@ -1,18 +1,33 @@
-import psycopg2
-import ccxt
-import config
-import asyncio
-import signals_packaging
-import traceback
-import config
-import json
+import psycopg2, json, ccxt, asyncio, signals_packaging
 import time as timer
+import configs.config as config
+import folders_regions as fr
 
 from datetime import datetime, timedelta
 
-rate_json_file = 'rate.json'
+rate_json_file = 'configs/rate.json'
 with open(rate_json_file, 'r') as f:
     rate_data = json.load(f)
+
+
+async def get_folder_region(signal_channel_id, cursor):
+    # Полученаем id папки которому принодлежит канал данного сигнала
+    cursor.execute(f'SELECT * FROM channels WHERE channel_id = {signal_channel_id}')
+    channels = cursor.fetchall()
+    if len(channels != 0):
+        channel = channels[0]
+        folder_id = channel[1]
+
+        # Получаем название папки
+        cursor.execute(f'SELECT * FROM folders WHERE folder_id = {folder_id}')
+        folders = cursor.fatchall()
+        if len(folders) != 0:
+            folder = folders[0]
+            return folder[2]
+        else:
+            return 'Err'
+    else:
+        return 'Err'
 
 # Функцыя которая проверяет сыгналы, те сигналы которые не прошли проверку перекидываются
 async def defecte_signals(signal_id, conn, cursor, message):
@@ -67,8 +82,8 @@ async def main():
 
             # Цыкл, который поочередно берет сыгналы и проверяет их
             for signal in signals:
-            # (channel_id(1), message_id(2), channel_name(3), date(4), time(5), coin(6), trend(7), tvh(8), rvh(9), lvh(10), targets(11), stop_loss(12), leverage(13), margin(14) , defecte_signals(15)) 
-            
+                region = await get_folder_region(signal[1], cursor)
+
             # Проверка существует ли такой сигнал в проверенных сигналах
                 check_signals = "SELECT * FROM verified_signals WHERE channel_id = %s AND message_id = %s"
                 cursor.execute(check_signals, (signal[1], signal[2]))
@@ -183,17 +198,17 @@ async def main():
                 cursor.execute(add_to_db, values)
                 conn.commit()
 
-                await signals_packaging.package_by_channels(signal[1], signal[2])
+                await signals_packaging.package_by_channels(signal[1], signal[2], region)
                 cursor.execute('SELECT * FROM verified_signals')
                 
-                rate_json_file = 'rate.json'
+                rate_json_file = 'configs/rate.json'
                 with open(rate_json_file, 'r') as f:
                     rate_data = json.load(f)
 
                 # Изменяем значение ru_rate
-                rate_data["ru_rate"] += 1
-                if rate_data["ru_rate"] > len(config.RU_GROUPS):
-                    rate_data["ru_rate"] = 1
+                rate_data[region] += 1
+                if rate_data[region] > len(config.RU_GROUPS):
+                    rate_data[region] = 1
 
                 # Записываем изменённые данные обратно в файл rate.json
                 with open(rate_json_file, 'w') as f:

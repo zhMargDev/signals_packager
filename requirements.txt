@@ -1,6 +1,5 @@
 telebot
-time
-psycopg2
+psycopg2-binary
 ccxt
 asyncio
-json
+beautifulsoup4
