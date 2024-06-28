@@ -1,0 +1,5 @@
+telebot
+psycopg2-binary
+ccxt
+asyncio
+beautifulsoup4
